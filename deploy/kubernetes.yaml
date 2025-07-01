@@ -1,0 +1,159 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aks-health-monitor
+  namespace: kube-system
+  labels:
+    app: aks-health-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aks-health-monitor
+  template:
+    metadata:
+      labels:
+        app: aks-health-monitor
+    spec:
+      serviceAccountName: aks-health-monitor
+      containers:
+      - name: aks-health-monitor
+        image: aks-health-monitor:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: AZURE_SUBSCRIPTION_ID
+          valueFrom:
+            secretKeyRef:
+              name: azure-credentials
+              key: subscription-id
+        - name: AZURE_RESOURCE_GROUP
+          valueFrom:
+            secretKeyRef:
+              name: azure-credentials
+              key: resource-group
+        - name: AZURE_CLUSTER_NAME
+          valueFrom:
+            secretKeyRef:
+              name: azure-credentials
+              key: cluster-name
+        - name: AZURE_TENANT_ID
+          valueFrom:
+            secretKeyRef:
+              name: azure-credentials
+              key: tenant-id
+        - name: AZURE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: azure-credentials
+              key: client-id
+        - name: AZURE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: azure-credentials
+              key: client-secret
+        # Optional environment variables for thresholds (ConfigMap values take precedence)
+        - name: POLL_INTERVAL
+          value: "30s"
+        - name: THRESHOLD_CRASHING_PODS_PERCENT
+          value: "10"
+        - name: THRESHOLD_PENDING_PODS_PERCENT
+          value: "15"
+        - name: THRESHOLD_NOT_READY_NODES_PERCENT
+          value: "25"
+        - name: THRESHOLD_FAILED_JOBS
+          value: "3"
+        - name: THRESHOLD_RESTART_COUNT
+          value: "20"
+        - name: THRESHOLD_CPU_USAGE_PERCENT
+          value: "85"
+        - name: THRESHOLD_MEMORY_USAGE_PERCENT
+          value: "90"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        volumeMounts:
+        - name: config
+          mountPath: /etc/config
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: aks-health-monitor-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aks-health-monitor
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aks-health-monitor
+rules:
+- apiGroups: [""]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aks-health-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aks-health-monitor
+subjects:
+- kind: ServiceAccount
+  name: aks-health-monitor
+  namespace: kube-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aks-health-monitor-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    # Configuration file for AKS Health Monitor
+    # This file can override environment variable defaults
+    pollInterval: 30s
+    thresholds:
+      crashingPodsPercent: 10     # Percentage of pods that can be crashing
+      pendingPodsPercent: 15      # Percentage of pods that can be pending
+      notReadyNodesPercent: 25    # Percentage of nodes that can be not ready
+      failedJobs: 3               # Maximum number of failed jobs
+      restartCount: 20            # Maximum restart count across all containers
+      cpuUsagePercent: 85         # Maximum CPU usage percentage
+      memoryUsagePercent: 90      # Maximum memory usage percentage
+    monitoredOperations:
+      - "upgrade"
+      - "update"
+      - "scale"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: azure-credentials
+  namespace: kube-system
+type: Opaque
+stringData:
+  subscription-id: "your-subscription-id"
+  resource-group: "your-resource-group"
+  cluster-name: "your-cluster-name"
+  tenant-id: "your-tenant-id"
+  client-id: "your-client-id"
+  client-secret: "your-client-secret"
